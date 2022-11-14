@@ -1,0 +1,111 @@
+import { ethers } from "ethers";
+import { MyToken__factory, TokenizedBallot__factory } from "../typechain-types";
+import * as dotenv from 'dotenv'; // see https://github.com/motdotla/dotenv#how-do-i-use-dotenv-with-import
+// import { getContractAddress } from "ethers/lib/utils";
+dotenv.config();
+
+const MINT_VALUE = ethers.utils.parseEther("10");
+
+
+async function main () {
+    // Terminal entry for contract and target contract
+        // const contractAddress = process.argv[2];
+        // const targetAddress = process.argv[3];
+
+    // Provider Network
+    const provider = new ethers.providers.AlchemyProvider("goerli", process.env.ALCHEMY_API_KEY ?? "");
+    const network = await provider.getNetwork(); 
+    const wallet = ethers.Wallet.fromMnemonic(process.env.MNEMONIC ?? "");
+    const signer = wallet.connect(provider);
+    // const wallet2 = new ethers.Wallet.fromPRIVATE_KEY2(process.env.PRIVATE_KEY2 ?? "");
+    // const signer2 = wallet2.connect(provider);
+    // console.log(`Connectd to wallet ${signer.address}`);
+
+    // Check balance of account
+    const balance1 = await signer.getBalance();
+    console.log(`Connected to the provider ${network.name} with wallet ${signer.address} and a balance of ${balance1}`);
+    
+    // Deploy token contract factory
+    const tokenContractFactory = new MyToken__factory(signer); 
+    const tokenContract = await tokenContractFactory.deploy();
+    await tokenContract.deployed();
+    console.log("--------------------------------------------------------------\n");
+    console.log(`Token contract deployed at ${tokenContract.address}\n`);
+    console.log("--------------------------------------------------------------\n");
+
+    // Mint tokens
+    const mintTx = await tokenContract.mint(signer.address, MINT_VALUE);
+    await mintTx.wait();
+    console.log(`Minted ${MINT_VALUE.toString()} tokens to account ${signer.address}`);
+
+    // Check token balance
+    let acc1Balance = await tokenContract.balanceOf(signer.address);
+    console.log(`Account ${signer.address} has a token balance of ${acc1Balance.toString()} after mint`);
+
+    // Check voting power
+    let acc1VotingPower = await tokenContract.getVotes(signer.address);
+    console.log(`Account ${signer.address} has ${acc1VotingPower.toString()} units of voting power before self delegating`);
+    
+    // Self delegate votes
+    const delegateTx = await tokenContract.connect(signer).delegate(signer.address);
+    await delegateTx.wait();
+
+    // Chceck the voting power after self delegating
+    acc1VotingPower = await tokenContract.getVotes(signer.address);
+    console.log(
+        `Account ${signer.address} has ${acc1VotingPower.toString()} units of voting power after self delegating`);
+
+    // Check past voting power
+    const lastBlock = await provider.getBlock("latest");
+    console.log(`Last block number is ${lastBlock.number}\n`);
+    let pastVotes = await tokenContract.getPastVotes(signer.address, lastBlock.number-1);
+    console.log(`Account ${signer.address} had ${pastVotes.toString()} voting power at previous block\n`)
+        if (pastVotes.eq(0)) {
+            setTimeout(() => {console.log("Slowing down for a few seconds for more on-chain blocks to be produced...\n")}, 10000)
+        }
+
+    // Deploy TokenBallot Contract
+    const proposals = ["Apes", "Punks", "ArtBlocks", "Mutants", "CoolCats", "MeeBits" ];
+        console.log(`With NFT proposals : \n`);
+        proposals.forEach((element, index) => {
+            console.log(`Proposal ${index}: ${element}`);
+        });
+        console.log(`\nInitiating token ballot contract deployment...\n`);
+        const ballotContractFactory = new TokenizedBallot__factory(signer);
+        const ballotContract = await ballotContractFactory.deploy(convertStringArrayToBytes32(proposals), tokenContract.address, lastBlock.number - 1);
+        await ballotContract.deployed();
+
+        console.log("--------------------------------------------------------------\n");
+        console.log(`Ballot contract deployed at ${ballotContract.address}\n`);
+        console.log("--------------------------------------------------------------\n");
+    
+    // Voting Begins
+        console.log(`Begin voting...\n`);
+        console.log(`Now voting: ${signer.address}\n`);
+        const v1Tx = await ballotContract.connect(signer).vote(1, 1);
+        await v1Tx.wait();
+        // console.log(`Now voting: ${signer2.address}\n`);
+        // const v2Tx = await ballotContract.connect(signer2).vote(1, 1);
+        // await v2Tx.wait();
+
+    // Print winning proposal
+    const winningProposal = await ballotContract.winningProposal();
+    const winnerName = ethers.utils.parseBytes32String(await ballotContract.winnerName());
+    console.log("--------------------------------------------------------------\n");
+    console.log(`Winning proposal: ${winningProposal}, Winner name: ${winnerName}\n`);
+    console.log("--------------------------------------------------------------\n");
+
+    // conversion to process the proposals from String array to Bytes32 array
+    function convertStringArrayToBytes32(array: string[]) {
+        const bytes32Array = [];
+        for (let index = 0; index < array.length; index++) {
+        bytes32Array.push(ethers.utils.formatBytes32String(array[index]));
+        }
+        return bytes32Array;
+    }
+    
+main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+});
+}
