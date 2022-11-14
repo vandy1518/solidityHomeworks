@@ -6,8 +6,6 @@ dotenv.config()
 const MINT_VALUE = ethers.utils.parseEther("10");
 
 async function main() {
-    console.log("Deploying Ballot contract");
-    console.log("Proposals: ");
     const contractAdress = process.argv[2];
     const targetAddress = process.argv[3];
     
